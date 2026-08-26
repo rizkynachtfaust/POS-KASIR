@@ -47,7 +47,7 @@
     .cart-footer { padding: 15px; border-top: 1px solid #e0e0e0; background: #fafafa; }
     .cart-total { font-size: 18px; font-weight: bold; display: flex; justify-content: space-between; margin-bottom: 15px; }
     
-    /* Admin & Report Section */
+    /* Admin & History Section */
     .admin-container { padding: 20px; max-width: 900px; margin: auto; }
     .summary-cards { display: flex; gap: 15px; margin-top: 15px; margin-bottom: 20px; }
     .card { flex: 1; background: #fff; padding: 15px; border-radius: 6px; border: 1px solid #e0e0e0; text-align: center; }
@@ -84,10 +84,10 @@
     </div>
   </div>
 
-  <!-- START SHIFT SCREEN -->
+  <!-- START SHIFT SCREEN (ADMIN ONLY) -->
   <div id="shift-screen" class="login-container hidden">
     <div class="login-card">
-      <h2>Buka Shift Kasir</h2>
+      <h2>Buka Shift Kasir (Admin)</h2>
       <p style="font-size: 12px; color: #666; margin-bottom: 15px; text-align: center;">Masukkan modal uang tunai awal di laci kasir.</p>
       <div class="form-group">
         <label>Modal Awal Kas (Rp)</label>
@@ -103,10 +103,11 @@
     <div class="navbar no-print">
       <div><strong>ESB POS Lite</strong> (<span id="user-display"></span>)</div>
       <div>
-        <button id="btn-kasir-view" class="btn hidden" style="width:auto; padding: 5px 10px;" onclick="toggleView('kasir')">Layar Kasir</button>
-        <button id="btn-report-view" class="btn" style="width:auto; padding: 5px 10px; background: #28a745;" onclick="toggleView('report')">Laporan Harian</button>
+        <button id="btn-kasir-view" class="btn" style="width:auto; padding: 5px 10px;" onclick="toggleView('kasir')">Layar Kasir</button>
+        <button id="btn-history-view" class="btn" style="width:auto; padding: 5px 10px; background: #17a2b8;" onclick="toggleView('history')">Riwayat Penjualan</button>
+        <button id="btn-report-view" class="btn hidden" style="width:auto; padding: 5px 10px; background: #28a745;" onclick="toggleView('report')">Laporan Harian</button>
         <button id="btn-admin-view" class="btn hidden" style="width:auto; padding: 5px 10px;" onclick="toggleView('admin')">Kelola Menu</button>
-        <button class="btn btn-danger" style="width:auto; padding: 5px 10px;" onclick="endShift()">Selesai Shift</button>
+        <button id="btn-end-shift" class="btn btn-danger hidden" style="width:auto; padding: 5px 10px;" onclick="endShift()">Selesai Shift</button>
         <button class="btn btn-secondary" style="width:auto; padding: 5px 10px;" onclick="logout()">Logout</button>
       </div>
     </div>
@@ -122,6 +123,10 @@
         <div class="cart-header">
           <h3>Detail Pesanan</h3>
           <div class="form-group" style="margin-top: 10px;">
+            <label>Nama Pelanggan *</label>
+            <input type="text" id="customer-name" placeholder="Masukkan nama pelanggan">
+          </div>
+          <div class="form-group">
             <label>Tipe Pesanan</label>
             <select id="order-type" onchange="toggleTableInput()">
               <option value="Dine-In">Dine-In (Makan di Tempat)</option>
@@ -153,7 +158,26 @@
       </div>
     </div>
 
-    <!-- REPORT VIEW (LAPORAN HARIAN) -->
+    <!-- HISTORY VIEW (KASIR & ADMIN) -->
+    <div id="history-view" class="admin-container hidden">
+      <h3>Riwayat Penjualan Hari Ini</h3>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>ID Transaksi</th>
+            <th>Waktu</th>
+            <th>Kasir</th>
+            <th>Pelanggan</th>
+            <th>Tipe</th>
+            <th>Metode</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody id="history-table-body"></tbody>
+      </table>
+    </div>
+
+    <!-- REPORT VIEW (ADMIN ONLY) -->
     <div id="report-view" class="admin-container hidden">
       <h3>Laporan Penjualan Harian (<span id="report-date"></span>)</h3>
       
@@ -168,13 +192,14 @@
         </div>
       </div>
 
-      <h4>Riwayat Transaksi Hari Ini</h4>
+      <h4>Detail Penjualan Harian</h4>
       <table class="table">
         <thead>
           <tr>
             <th>ID Transaksi</th>
             <th>Waktu</th>
             <th>Kasir</th>
+            <th>Pelanggan</th>
             <th>Tipe</th>
             <th>Metode</th>
             <th>Total</th>
@@ -184,7 +209,7 @@
       </table>
     </div>
 
-    <!-- ADMIN VIEW -->
+    <!-- ADMIN VIEW (ADMIN ONLY) -->
     <div id="admin-view" class="admin-container hidden">
       <h3>Manajemen Menu</h3>
       <div style="background: #fff; padding: 15px; border-radius: 6px; margin-top: 15px;">
@@ -275,8 +300,11 @@
           document.getElementById("user-display").innerText = `${data.username} (${data.role})`;
           document.getElementById("login-screen").classList.add("hidden");
 
-          // Cek apakah ada active shift untuk kasir ini
-          await checkKasirShift();
+          if (currentUser.role === "ADMIN") {
+            await checkAdminShift();
+          } else {
+            openMainApp();
+          }
         } else {
           alert(data.message);
         }
@@ -288,7 +316,7 @@
       }
     }
 
-    async function checkKasirShift() {
+    async function checkAdminShift() {
       try {
         const res = await fetch(`${API_URL}?action=checkShift&kasir=${currentUser.username}`, {
           method: "GET",
@@ -340,14 +368,10 @@
     async function endShift() {
       if (!confirm("Apakah Anda yakin ingin mengakhiri shift kerja?")) return;
 
-      // Hitung total penjualan selama shift hari ini
       const resReport = await fetch(`${API_URL}?action=getDailyReport`, { method: "GET", redirect: "follow" });
       const reportData = await resReport.json();
       
-      const totalPenjualanShift = reportData.transactions
-        .filter(t => t.kasir === currentUser.username)
-        .reduce((sum, t) => sum + t.total, 0);
-
+      const totalPenjualanShift = reportData.transactions.reduce((sum, t) => sum + t.total, 0);
       const kasAkhir = modalAwalKas + totalPenjualanShift;
 
       try {
@@ -377,8 +401,9 @@
       document.getElementById("app-screen").classList.remove("hidden");
       if (currentUser.role === "ADMIN") {
         document.getElementById("btn-admin-view").classList.remove("hidden");
+        document.getElementById("btn-report-view").classList.remove("hidden");
+        document.getElementById("btn-end-shift").classList.remove("hidden");
       }
-      document.getElementById("btn-kasir-view").classList.remove("hidden");
       toggleView("kasir");
       loadMenu();
     }
@@ -389,6 +414,9 @@
       cart = [];
       document.getElementById("app-screen").classList.add("hidden");
       document.getElementById("shift-screen").classList.add("hidden");
+      document.getElementById("btn-admin-view").classList.add("hidden");
+      document.getElementById("btn-report-view").classList.add("hidden");
+      document.getElementById("btn-end-shift").classList.add("hidden");
       document.getElementById("login-screen").classList.remove("hidden");
     }
 
@@ -397,6 +425,7 @@
       document.getElementById("kasir-view").classList.add("hidden");
       document.getElementById("admin-view").classList.add("hidden");
       document.getElementById("report-view").classList.add("hidden");
+      document.getElementById("history-view").classList.add("hidden");
 
       if (view === "admin") {
         document.getElementById("admin-view").classList.remove("hidden");
@@ -404,6 +433,9 @@
       } else if (view === "report") {
         document.getElementById("report-view").classList.remove("hidden");
         loadDailyReport();
+      } else if (view === "history") {
+        document.getElementById("history-view").classList.remove("hidden");
+        loadHistory();
       } else {
         document.getElementById("kasir-view").classList.remove("hidden");
       }
@@ -506,6 +538,9 @@
 
     // --- TRANSACTION ---
     async function processPayment() {
+      const customerName = document.getElementById("customer-name").value.trim();
+      if (!customerName) return alert("Harap isi Nama Pelanggan!");
+
       if (cart.length === 0) return alert("Keranjang masih kosong!");
 
       const orderType = document.getElementById("order-type").value;
@@ -522,6 +557,7 @@
       const payload = {
         action: "saveTransaction",
         kasir: currentUser.username,
+        namaPelanggan: customerName,
         jenisPesanan: orderType,
         nomorMeja: orderType === "Dine-In" ? tableNumber : "-",
         metodePembayaran: paymentMethod,
@@ -544,6 +580,7 @@
         if (data.success) {
           printReceipt(data.transactionId, payload);
           cart = [];
+          document.getElementById("customer-name").value = "";
           renderCart();
           await loadMenu();
         }
@@ -561,13 +598,14 @@
         <div>ID: ${txId}</div>
         <div>Tgl: ${new Date().toLocaleString('id-ID')}</div>
         <div>Kasir: ${data.kasir}</div>
+        <div>Pelanggan: ${data.namaPelanggan}</div>
         <div>Tipe: ${data.jenisPesanan} ${data.nomorMeja !== '-' ? '(Meja ' + data.nomorMeja + ')' : ''}</div>
       `;
 
       let itemsHtml = "";
       data.items.forEach(i => {
         itemsHtml += `
-          <div style="display:flex; justify-between;">
+          <div style="display:flex; justify-content:space-between;">
             <span>${i.nama} x${i.qty}</span>
             <span>Rp ${(i.harga * i.qty).toLocaleString()}</span>
           </div>
@@ -584,7 +622,35 @@
       receipt.classList.add("hidden");
     }
 
-    // --- DAILY REPORT ---
+    // --- HISTORY (KASIR & ADMIN) ---
+    async function loadHistory() {
+      try {
+        const res = await fetch(`${API_URL}?action=getHistory`, { method: "GET", redirect: "follow" });
+        const data = await res.json();
+
+        if (data.success) {
+          const tbody = document.getElementById("history-table-body");
+          tbody.innerHTML = "";
+          data.transactions.forEach(t => {
+            tbody.innerHTML += `
+              <tr>
+                <td>${t.id}</td>
+                <td>${t.waktu}</td>
+                <td>${t.kasir}</td>
+                <td>${t.pelanggan}</td>
+                <td>${t.jenis} ${t.meja !== '-' ? '(Meja ' + t.meja + ')' : ''}</td>
+                <td>${t.metode}</td>
+                <td>Rp ${t.total.toLocaleString()}</td>
+              </tr>
+            `;
+          });
+        }
+      } catch (err) {
+        console.error("Gagal memuat riwayat", err);
+      }
+    }
+
+    // --- DAILY REPORT (ADMIN ONLY) ---
     async function loadDailyReport() {
       try {
         const res = await fetch(`${API_URL}?action=getDailyReport`, { method: "GET", redirect: "follow" });
@@ -605,6 +671,7 @@
                 <td>${t.id}</td>
                 <td>${t.waktu}</td>
                 <td>${t.kasir}</td>
+                <td>${t.pelanggan}</td>
                 <td>${t.jenis} ${t.meja !== '-' ? '(Meja ' + t.meja + ')' : ''}</td>
                 <td>${t.metode}</td>
                 <td>Rp ${t.total.toLocaleString()}</td>
