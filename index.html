@@ -22,6 +22,10 @@
     .btn-secondary { background: #6c757d; margin-top: 5px; }
     .btn-danger { background: #dc3545; }
     .btn-danger:hover { background: #bd2130; }
+
+    /* Alert Banner Shift Status */
+    .shift-alert { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 10px 15px; border-radius: 4px; font-size: 13px; margin-bottom: 15px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+    .shift-alert.open { background: #d4edda; color: #155724; border-color: #c3e6cb; }
     
     /* Navbar */
     .navbar { background: #fff; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e0e0e0; }
@@ -115,6 +119,12 @@
     <!-- KASIR VIEW -->
     <div id="kasir-view" class="pos-container">
       <div class="menu-section">
+        <!-- SHIFT STATUS BANNER -->
+        <div id="shift-banner" class="shift-alert">
+          <span id="shift-status-text">Memeriksa status shift...</span>
+          <button style="padding: 2px 8px; font-size: 11px; cursor: pointer;" onclick="checkSystemShift()">Refresh Status</button>
+        </div>
+
         <h3>Daftar Menu</h3>
         <div id="menu-grid" class="menu-grid"></div>
       </div>
@@ -273,11 +283,12 @@
 
     let currentUser = null;
     let currentShiftId = null;
+    let isShiftOpen = false;
     let modalAwalKas = 0;
     let menuList = [];
     let cart = [];
 
-    // --- AUTHENTICATION & SHIFT ---
+    // --- AUTHENTICATION & SHIFT ALGORITHM ---
     async function handleLogin() {
       const usernameInput = document.getElementById("login-username").value;
       const passwordInput = document.getElementById("login-password").value;
@@ -318,10 +329,7 @@
 
     async function checkAdminShift() {
       try {
-        const res = await fetch(`${API_URL}?action=checkShift&kasir=${currentUser.username}`, {
-          method: "GET",
-          redirect: "follow"
-        });
+        const res = await fetch(`${API_URL}?action=checkActiveShift`, { method: "GET", redirect: "follow" });
         const data = await res.json();
 
         if (data.active) {
@@ -332,7 +340,34 @@
           document.getElementById("shift-screen").classList.remove("hidden");
         }
       } catch (err) {
-        console.error("Gagal verifikasi shift", err);
+        console.error("Gagal verifikasi shift admin", err);
+      }
+    }
+
+    async function checkSystemShift() {
+      try {
+        const res = await fetch(`${API_URL}?action=checkActiveShift`, { method: "GET", redirect: "follow" });
+        const data = await res.json();
+
+        const banner = document.getElementById("shift-banner");
+        const statusText = document.getElementById("shift-status-text");
+        const btnPay = document.getElementById("btn-pay");
+
+        if (data.active) {
+          isShiftOpen = true;
+          currentShiftId = data.shiftId;
+          banner.className = "shift-alert open";
+          statusText.innerText = `Shift AKTIF dibuka oleh: ${data.openedBy}`;
+          btnPay.disabled = false;
+        } else {
+          isShiftOpen = false;
+          currentShiftId = null;
+          banner.className = "shift-alert";
+          statusText.innerText = "Sistem Dikunci: Admin BELUM membuka shift kerja!";
+          btnPay.disabled = true;
+        }
+      } catch (err) {
+        console.error("Gagal cek status shift", err);
       }
     }
 
@@ -366,7 +401,7 @@
     }
 
     async function endShift() {
-      if (!confirm("Apakah Anda yakin ingin mengakhiri shift kerja?")) return;
+      if (!confirm("Apakah Anda yakin ingin mengakhiri shift kerja hari ini?")) return;
 
       const resReport = await fetch(`${API_URL}?action=getDailyReport`, { method: "GET", redirect: "follow" });
       const reportData = await resReport.json();
@@ -405,12 +440,14 @@
         document.getElementById("btn-end-shift").classList.remove("hidden");
       }
       toggleView("kasir");
+      checkSystemShift();
       loadMenu();
     }
 
     function logout() {
       currentUser = null;
       currentShiftId = null;
+      isShiftOpen = false;
       cart = [];
       document.getElementById("app-screen").classList.add("hidden");
       document.getElementById("shift-screen").classList.add("hidden");
@@ -438,6 +475,7 @@
         loadHistory();
       } else {
         document.getElementById("kasir-view").classList.remove("hidden");
+        checkSystemShift();
       }
     }
 
@@ -454,10 +492,7 @@
     // --- POS DATA ---
     async function loadMenu() {
       try {
-        const res = await fetch(`${API_URL}?action=getMenu`, {
-          method: "GET",
-          redirect: "follow"
-        });
+        const res = await fetch(`${API_URL}?action=getMenu`, { method: "GET", redirect: "follow" });
         menuList = await res.json();
         renderMenuGrid();
       } catch (err) {
@@ -481,6 +516,10 @@
 
     // --- CART ---
     function addToCart(id) {
+      if (!isShiftOpen && currentUser.role !== "ADMIN") {
+        return alert("Transaksi Ditolak! Admin belum membuka shift kerja.");
+      }
+
       const item = menuList.find(m => m.id === id);
       if (item.stok <= 0) return alert("Stok habis!");
 
@@ -536,8 +575,13 @@
       document.getElementById("cart-total-amount").innerText = `Rp ${total.toLocaleString()}`;
     }
 
-    // --- TRANSACTION ---
+    // --- TRANSACTION WITH SHIFT CHECK ---
     async function processPayment() {
+      // Validasi Algoritma: Cek status shift di sisi client
+      if (!isShiftOpen) {
+        return alert("Transaksi Ditolak! Admin belum membuka shift kerja hari ini.");
+      }
+
       const customerName = document.getElementById("customer-name").value.trim();
       if (!customerName) return alert("Harap isi Nama Pelanggan!");
 
@@ -583,12 +627,13 @@
           document.getElementById("customer-name").value = "";
           renderCart();
           await loadMenu();
+        } else {
+          alert(data.message); // Menampilkan balasan error dari server jika shift ditutup
         }
       } catch (err) {
         alert("Gagal memproses transaksi.");
       } finally {
         btnPay.disabled = false;
-        btnPay.innerText = "Bayar & Cetak Struk";
       }
     }
 
