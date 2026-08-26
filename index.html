@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>POS Komersial</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #f4f6f8; color: #333; }
+    .hidden { display: none !important; }
+    
+    /* Login Screen */
+    .login-container { display: flex; justify-content: center; align-items: center; height: 100vh; }
+    .login-card { background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 100%; max-width: 360px; }
+    .login-card h2 { margin-bottom: 20px; text-align: center; color: #1a73e8; }
+    .form-group { margin-bottom: 15px; }
+    .form-group label { display: block; margin-bottom: 5px; font-size: 14px; font-weight: 600; }
+    .form-group input, .form-group select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
+    .btn { width: 100%; padding: 10px; background: #1a73e8; color: #fff; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+    .btn:hover { background: #1557b0; }
+    .btn:disabled { background: #ccc; cursor: not-allowed; }
+    .btn-secondary { background: #6c757d; margin-top: 5px; }
+    
+    /* Navbar */
+    .navbar { background: #fff; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e0e0e0; }
+    
+    /* Layout POS */
+    .pos-container { display: flex; height: calc(100vh - 60px); }
+    .menu-section { flex: 2; padding: 20px; overflow-y: auto; }
+    .cart-section { flex: 1; background: #fff; border-left: 1px solid #e0e0e0; display: flex; flex-direction: column; }
+    
+    /* Menu Grid */
+    .menu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 15px; margin-top: 15px; }
+    .menu-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 15px; text-align: center; cursor: pointer; transition: 0.2s; }
+    .menu-card:hover { border-color: #1a73e8; transform: translateY(-2px); }
+    .menu-card .price { color: #1a73e8; font-weight: bold; margin-top: 5px; }
+    .menu-card .stock { font-size: 12px; color: #666; margin-top: 2px; }
+    
+    /* Cart */
+    .cart-header { padding: 15px; border-bottom: 1px solid #e0e0e0; }
+    .cart-items { flex: 1; overflow-y: auto; padding: 15px; }
+    .cart-item { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .cart-item-controls { display: flex; align-items: center; gap: 8px; }
+    .cart-item-controls button { width: 24px; height: 24px; border: 1px solid #ccc; background: #fff; cursor: pointer; border-radius: 3px; }
+    .cart-footer { padding: 15px; border-top: 1px solid #e0e0e0; background: #fafafa; }
+    .cart-total { font-size: 18px; font-weight: bold; display: flex; justify-content: space-between; margin-bottom: 15px; }
+    
+    /* Admin Section */
+    .admin-container { padding: 20px; max-width: 800px; margin: auto; }
+    .table { width: 100%; border-collapse: collapse; background: #fff; margin-top: 15px; }
+    .table th, .table td { border: 1px solid #e0e0e0; padding: 10px; text-align: left; }
+    .table th { background: #fafafa; }
+    
+    /* Thermal Receipt Format */
+    @media print {
+      body * { visibility: hidden; }
+      #receipt, #receipt * { visibility: visible; }
+      #receipt { position: absolute; left: 0; top: 0; width: 58mm; padding: 5px; font-family: monospace; font-size: 12px; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- LOGIN SCREEN -->
+  <div id="login-screen" class="login-container">
+    <div class="login-card">
+      <h2>POS Login</h2>
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" id="login-username" value="kasir1">
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="login-password" value="kasir123">
+      </div>
+      <button id="btn-login" class="btn" onclick="handleLogin()">Login</button>
+    </div>
+  </div>
+
+  <!-- MAIN APP SCREEN -->
+  <div id="app-screen" class="hidden">
+    <!-- NAVBAR -->
+    <div class="navbar no-print">
+      <div><strong>ESB POS Lite</strong> (<span id="user-display"></span>)</div>
+      <div>
+        <button id="btn-admin-view" class="btn hidden" style="width:auto; padding: 5px 10px;" onclick="toggleView('admin')">Kelola Menu</button>
+        <button id="btn-kasir-view" class="btn hidden" style="width:auto; padding: 5px 10px;" onclick="toggleView('kasir')">Layar Kasir</button>
+        <button class="btn btn-secondary" style="width:auto; padding: 5px 10px;" onclick="logout()">Logout</button>
+      </div>
+    </div>
+
+    <!-- KASIR VIEW -->
+    <div id="kasir-view" class="pos-container">
+      <div class="menu-section">
+        <h3>Daftar Menu</h3>
+        <div id="menu-grid" class="menu-grid"></div>
+      </div>
+      
+      <div class="cart-section">
+        <div class="cart-header">
+          <h3>Detail Pesanan</h3>
+          <div class="form-group" style="margin-top: 10px;">
+            <label>Tipe Pesanan</label>
+            <select id="order-type" onchange="toggleTableInput()">
+              <option value="Dine-In">Dine-In (Makan di Tempat)</option>
+              <option value="Takeaway">Takeaway (Bawa Pulang)</option>
+            </select>
+          </div>
+          <div class="form-group" id="table-group">
+            <label>Nomor Meja</label>
+            <input type="text" id="table-number" placeholder="Contoh: 05">
+          </div>
+        </div>
+
+        <div id="cart-items" class="cart-items"></div>
+
+        <div class="cart-footer">
+          <div class="cart-total">
+            <span>Total</span>
+            <span id="cart-total-amount">Rp 0</span>
+          </div>
+          <div class="form-group">
+            <label>Metode Pembayaran</label>
+            <select id="payment-method">
+              <option value="Tunai">Tunai</option>
+              <option value="QRIS">QRIS</option>
+            </select>
+          </div>
+          <button id="btn-pay" class="btn" onclick="processPayment()">Bayar & Cetak Struk</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADMIN VIEW -->
+    <div id="admin-view" class="admin-container hidden">
+      <h3>Manajemen Menu</h3>
+      <div style="background: #fff; padding: 15px; border-radius: 6px; margin-top: 15px;">
+        <h4 id="form-title">Tambah / Edit Menu</h4>
+        <input type="hidden" id="menu-id">
+        <div class="form-group" style="margin-top:10px;">
+          <label>Nama Menu</label>
+          <input type="text" id="menu-nama">
+        </div>
+        <div class="form-group">
+          <label>Kategori</label>
+          <input type="text" id="menu-kategori">
+        </div>
+        <div class="form-group">
+          <label>Harga (Rp)</label>
+          <input type="number" id="menu-harga">
+        </div>
+        <div class="form-group">
+          <label>Stok</label>
+          <input type="number" id="menu-stok">
+        </div>
+        <button id="btn-save-menu" class="btn" onclick="saveMenu()">Simpan Menu</button>
+      </div>
+
+      <table class="table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Nama</th>
+            <th>Kategori</th>
+            <th>Harga</th>
+            <th>Stok</th>
+            <th>Aksi</th>
+          </tr>
+        </thead>
+        <tbody id="admin-menu-table"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- RECEIPT TEMPLATE -->
+  <div id="receipt" class="hidden">
+    <div style="text-align: center; margin-bottom: 10px;">
+      <h4>RESTO KOMERSIAL</h4>
+      <p style="font-size: 10px;">Jl. Raya Utama No. 123</p>
+      <hr style="border-top: 1px dashed #000; margin: 5px 0;">
+    </div>
+    <div id="receipt-details"></div>
+    <hr style="border-top: 1px dashed #000; margin: 5px 0;">
+    <div id="receipt-items"></div>
+    <hr style="border-top: 1px dashed #000; margin: 5px 0;">
+    <div id="receipt-total" style="text-align: right; font-weight: bold;"></div>
+    <div style="text-align: center; margin-top: 10px; font-size: 10px;">
+      <p>Terima Kasih Atas Kunjungan Anda</p>
+    </div>
+  </div>
+
+  <script>
+    // GANTI PASTA URL WEB APP DEPLOYMENT ANDA DI BAWAH INI
+    const API_URL = "https://script.google.com/macros/s/AKfycbyeEnkPNBmNlRefF8Zq_W1Zz0lPAgR5dLQzKArHKkDOiMysdZO6N-KnlEfOEAl27gDK/exec";
+
+    let currentUser = null;
+    let menuList = [];
+    let cart = [];
+
+    // --- AUTHENTICATION ---
+    async function handleLogin() {
+      const usernameInput = document.getElementById("login-username").value;
+      const passwordInput = document.getElementById("login-password").value;
+      const btnLogin = document.getElementById("btn-login");
+
+      btnLogin.disabled = true;
+      btnLogin.innerText = "Memproses...";
+
+      try {
+        const res = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({ action: "login", username: usernameInput, password: passwordInput }),
+          redirect: "follow"
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          currentUser = data;
+          document.getElementById("user-display").innerText = `${data.username} (${data.role})`;
+          document.getElementById("login-screen").classList.add("hidden");
+          document.getElementById("app-screen").classList.remove("hidden");
+
+          if (data.role === "ADMIN") {
+            document.getElementById("btn-admin-view").classList.remove("hidden");
+            document.getElementById("btn-kasir-view").classList.remove("hidden");
+          }
+          
+          toggleView("kasir");
+          await loadMenu();
+        } else {
+          alert(data.message);
+        }
+      } catch (err) {
+        alert("Gagal terhubung ke server Google Sheets.");
+      } finally {
+        btnLogin.disabled = false;
+        btnLogin.innerText = "Login";
+      }
+    }
+
+    function logout() {
+      currentUser = null;
+      cart = [];
+      document.getElementById("app-screen").classList.add("hidden");
+      document.getElementById("login-screen").classList.remove("hidden");
+    }
+
+    // --- NAVIGATION ---
+    function toggleView(view) {
+      if (view === "admin") {
+        document.getElementById("kasir-view").classList.add("hidden");
+        document.getElementById("admin-view").classList.remove("hidden");
+        renderAdminTable();
+      } else {
+        document.getElementById("admin-view").classList.add("hidden");
+        document.getElementById("kasir-view").classList.remove("hidden");
+      }
+    }
+
+    function toggleTableInput() {
+      const type = document.getElementById("order-type").value;
+      const tableGroup = document.getElementById("table-group");
+      if (type === "Takeaway") {
+        tableGroup.classList.add("hidden");
+      } else {
+        tableGroup.classList.remove("hidden");
+      }
+    }
+
+    // --- POS DATA ---
+    async function loadMenu() {
+      try {
+        const res = await fetch(`${API_URL}?action=getMenu`, {
+          method: "GET",
+          redirect: "follow"
+        });
+        menuList = await res.json();
+        renderMenuGrid();
+      } catch (err) {
+        console.error("Gagal memuat menu", err);
+      }
+    }
+
+    function renderMenuGrid() {
+      const grid = document.getElementById("menu-grid");
+      grid.innerHTML = "";
+      menuList.forEach(item => {
+        grid.innerHTML += `
+          <div class="menu-card" onclick="addToCart('${item.id}')">
+            <strong>${item.nama}</strong>
+            <div class="price">Rp ${item.harga.toLocaleString()}</div>
+            <div class="stock">Stok: ${item.stok}</div>
+          </div>
+        `;
+      });
+    }
+
+    // --- CART ---
+    function addToCart(id) {
+      const item = menuList.find(m => m.id === id);
+      if (item.stok <= 0) return alert("Stok habis!");
+
+      const cartItem = cart.find(c => c.id === id);
+      if (cartItem) {
+        if (cartItem.qty + 1 > item.stok) return alert("Jumlah melebihi stok!");
+        cartItem.qty++;
+      } else {
+        cart.push({ ...item, qty: 1 });
+      }
+      renderCart();
+    }
+
+    function updateQty(id, delta) {
+      const cartItem = cart.find(c => c.id === id);
+      if (!cartItem) return;
+
+      const menuItem = menuList.find(m => m.id === id);
+      if (delta > 0 && cartItem.qty + delta > menuItem.stok) {
+        return alert("Stok tidak mencukupi!");
+      }
+
+      cartItem.qty += delta;
+      if (cartItem.qty <= 0) {
+        cart = cart.filter(c => c.id !== id);
+      }
+      renderCart();
+    }
+
+    function renderCart() {
+      const container = document.getElementById("cart-items");
+      container.innerHTML = "";
+      let total = 0;
+
+      cart.forEach(item => {
+        const subtotal = item.harga * item.qty;
+        total += subtotal;
+        container.innerHTML += `
+          <div class="cart-item">
+            <div>
+              <div><strong>${item.nama}</strong></div>
+              <small>Rp ${item.harga.toLocaleString()} x ${item.qty}</small>
+            </div>
+            <div class="cart-item-controls">
+              <button onclick="updateQty('${item.id}', -1)">-</button>
+              <span>${item.qty}</span>
+              <button onclick="updateQty('${item.id}', 1)">+</button>
+            </div>
+          </div>
+        `;
+      });
+
+      document.getElementById("cart-total-amount").innerText = `Rp ${total.toLocaleString()}`;
+    }
+
+    // --- TRANSACTION ---
+    async function processPayment() {
+      if (cart.length === 0) return alert("Keranjang masih kosong!");
+
+      const orderType = document.getElementById("order-type").value;
+      const tableNumber = document.getElementById("table-number").value;
+      const paymentMethod = document.getElementById("payment-method").value;
+      const btnPay = document.getElementById("btn-pay");
+
+      if (orderType === "Dine-In" && !tableNumber) {
+        return alert("Harap isi nomor meja untuk Dine-In!");
+      }
+
+      const totalAmount = cart.reduce((sum, i) => sum + (i.harga * i.qty), 0);
+
+      const payload = {
+        action: "saveTransaction",
+        kasir: currentUser.username,
+        jenisPesanan: orderType,
+        nomorMeja: orderType === "Dine-In" ? tableNumber : "-",
+        metodePembayaran: paymentMethod,
+        total: totalAmount,
+        items: cart
+      };
+
+      btnPay.disabled = true;
+      btnPay.innerText = "Memproses Transaksi...";
+
+      try {
+        const res = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify(payload),
+          redirect: "follow"
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          printReceipt(data.transactionId, payload);
+          cart = [];
+          renderCart();
+          await loadMenu();
+        }
+      } catch (err) {
+        alert("Gagal memproses transaksi.");
+      } finally {
+        btnPay.disabled = false;
+        btnPay.innerText = "Bayar & Cetak Struk";
+      }
+    }
+
+    function printReceipt(txId, data) {
+      const receipt = document.getElementById("receipt");
+      document.getElementById("receipt-details").innerHTML = `
+        <div>ID: ${txId}</div>
+        <div>Tgl: ${new Date().toLocaleString('id-ID')}</div>
+        <div>Kasir: ${data.kasir}</div>
+        <div>Tipe: ${data.jenisPesanan} ${data.nomorMeja !== '-' ? '(Meja ' + data.nomorMeja + ')' : ''}</div>
+      `;
+
+      let itemsHtml = "";
+      data.items.forEach(i => {
+        itemsHtml += `
+          <div style="display:flex; justify-content:space-between;">
+            <span>${i.nama} x${i.qty}</span>
+            <span>Rp ${(i.harga * i.qty).toLocaleString()}</span>
+          </div>
+        `;
+      });
+      document.getElementById("receipt-items").innerHTML = itemsHtml;
+      document.getElementById("receipt-total").innerHTML = `
+        <div>TOTAL: Rp ${data.total.toLocaleString()}</div>
+        <div style="font-size:10px; font-weight:normal;">Bayar: ${data.metodePembayaran}</div>
+      `;
+
+      receipt.classList.remove("hidden");
+      window.print();
+      receipt.classList.add("hidden");
+    }
+
+    // --- ADMIN ---
+    function renderAdminTable() {
+      const tbody = document.getElementById("admin-menu-table");
+      tbody.innerHTML = "";
+      menuList.forEach(m => {
+        tbody.innerHTML += `
+          <tr>
+            <td>${m.id}</td>
+            <td>${m.nama}</td>
+            <td>${m.kategori}</td>
+            <td>Rp ${m.harga.toLocaleString()}</td>
+            <td>${m.stok}</td>
+            <td><button style="padding:2px 8px;" onclick="editMenu('${m.id}')">Edit</button></td>
+          </tr>
+        `;
+      });
+    }
+
+    function editMenu(id) {
+      const m = menuList.find(item => item.id === id);
+      if (!m) return;
+      document.getElementById("menu-id").value = m.id;
+      document.getElementById("menu-nama").value = m.nama;
+      document.getElementById("menu-kategori").value = m.kategori;
+      document.getElementById("menu-harga").value = m.harga;
+      document.getElementById("menu-stok").value = m.stok;
+    }
+
+    async function saveMenu() {
+      const btnSave = document.getElementById("btn-save-menu");
+      const payload = {
+        action: "saveMenu",
+        id: document.getElementById("menu-id").value,
+        nama: document.getElementById("menu-nama").value,
+        kategori: document.getElementById("menu-kategori").value,
+        harga: Number(document.getElementById("menu-harga").value),
+        stok: Number(document.getElementById("menu-stok").value)
+      };
+
+      if (!payload.nama || !payload.harga) return alert("Nama dan harga wajib diisi!");
+
+      btnSave.disabled = true;
+      btnSave.innerText = "Menyimpan...";
+
+      try {
+        await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify(payload),
+          redirect: "follow"
+        });
+        alert("Menu berhasil disimpan!");
+        
+        document.getElementById("menu-id").value = "";
+        document.getElementById("menu-nama").value = "";
+        document.getElementById("menu-kategori").value = "";
+        document.getElementById("menu-harga").value = "";
+        document.getElementById("menu-stok").value = "";
+        
+        await loadMenu();
+        renderAdminTable();
+      } catch (err) {
+        alert("Gagal menyimpan menu.");
+      } finally {
+        btnSave.disabled = false;
+        btnSave.innerText = "Simpan Menu";
+      }
+    }
+  </script>
+</body>
+</html>
