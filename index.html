@@ -9,7 +9,7 @@
     body { background: #f4f6f8; color: #333; }
     .hidden { display: none !important; }
     
-    /* Login Screen */
+    /* Login & Modal Screen */
     .login-container { display: flex; justify-content: center; align-items: center; height: 100vh; }
     .login-card { background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 100%; max-width: 360px; }
     .login-card h2 { margin-bottom: 20px; text-align: center; color: #1a73e8; }
@@ -20,6 +20,8 @@
     .btn:hover { background: #1557b0; }
     .btn:disabled { background: #ccc; cursor: not-allowed; }
     .btn-secondary { background: #6c757d; margin-top: 5px; }
+    .btn-danger { background: #dc3545; }
+    .btn-danger:hover { background: #bd2130; }
     
     /* Navbar */
     .navbar { background: #fff; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e0e0e0; }
@@ -45,10 +47,14 @@
     .cart-footer { padding: 15px; border-top: 1px solid #e0e0e0; background: #fafafa; }
     .cart-total { font-size: 18px; font-weight: bold; display: flex; justify-content: space-between; margin-bottom: 15px; }
     
-    /* Admin Section */
-    .admin-container { padding: 20px; max-width: 800px; margin: auto; }
+    /* Admin & Report Section */
+    .admin-container { padding: 20px; max-width: 900px; margin: auto; }
+    .summary-cards { display: flex; gap: 15px; margin-top: 15px; margin-bottom: 20px; }
+    .card { flex: 1; background: #fff; padding: 15px; border-radius: 6px; border: 1px solid #e0e0e0; text-align: center; }
+    .card h4 { font-size: 14px; color: #666; margin-bottom: 5px; }
+    .card .value { font-size: 20px; font-weight: bold; color: #1a73e8; }
     .table { width: 100%; border-collapse: collapse; background: #fff; margin-top: 15px; }
-    .table th, .table td { border: 1px solid #e0e0e0; padding: 10px; text-align: left; }
+    .table th, .table td { border: 1px solid #e0e0e0; padding: 10px; text-align: left; font-size: 14px; }
     .table th { background: #fafafa; }
     
     /* Thermal Receipt Format */
@@ -78,14 +84,29 @@
     </div>
   </div>
 
+  <!-- START SHIFT SCREEN -->
+  <div id="shift-screen" class="login-container hidden">
+    <div class="login-card">
+      <h2>Buka Shift Kasir</h2>
+      <p style="font-size: 12px; color: #666; margin-bottom: 15px; text-align: center;">Masukkan modal uang tunai awal di laci kasir.</p>
+      <div class="form-group">
+        <label>Modal Awal Kas (Rp)</label>
+        <input type="number" id="shift-modal-awal" value="100000">
+      </div>
+      <button id="btn-start-shift" class="btn" onclick="startShift()">Mulai Shift Kerja</button>
+    </div>
+  </div>
+
   <!-- MAIN APP SCREEN -->
   <div id="app-screen" class="hidden">
     <!-- NAVBAR -->
     <div class="navbar no-print">
       <div><strong>ESB POS Lite</strong> (<span id="user-display"></span>)</div>
       <div>
-        <button id="btn-admin-view" class="btn hidden" style="width:auto; padding: 5px 10px;" onclick="toggleView('admin')">Kelola Menu</button>
         <button id="btn-kasir-view" class="btn hidden" style="width:auto; padding: 5px 10px;" onclick="toggleView('kasir')">Layar Kasir</button>
+        <button id="btn-report-view" class="btn" style="width:auto; padding: 5px 10px; background: #28a745;" onclick="toggleView('report')">Laporan Harian</button>
+        <button id="btn-admin-view" class="btn hidden" style="width:auto; padding: 5px 10px;" onclick="toggleView('admin')">Kelola Menu</button>
+        <button class="btn btn-danger" style="width:auto; padding: 5px 10px;" onclick="endShift()">Selesai Shift</button>
         <button class="btn btn-secondary" style="width:auto; padding: 5px 10px;" onclick="logout()">Logout</button>
       </div>
     </div>
@@ -130,6 +151,37 @@
           <button id="btn-pay" class="btn" onclick="processPayment()">Bayar & Cetak Struk</button>
         </div>
       </div>
+    </div>
+
+    <!-- REPORT VIEW (LAPORAN HARIAN) -->
+    <div id="report-view" class="admin-container hidden">
+      <h3>Laporan Penjualan Harian (<span id="report-date"></span>)</h3>
+      
+      <div class="summary-cards">
+        <div class="card">
+          <h4>Total Transaksi</h4>
+          <div class="value" id="summary-tx-count">0</div>
+        </div>
+        <div class="card">
+          <h4>Total Pendapatan</h4>
+          <div class="value" id="summary-total-revenue">Rp 0</div>
+        </div>
+      </div>
+
+      <h4>Riwayat Transaksi Hari Ini</h4>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>ID Transaksi</th>
+            <th>Waktu</th>
+            <th>Kasir</th>
+            <th>Tipe</th>
+            <th>Metode</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody id="report-table-body"></tbody>
+      </table>
     </div>
 
     <!-- ADMIN VIEW -->
@@ -195,10 +247,12 @@
     const API_URL = "https://script.google.com/macros/s/AKfycbyeEnkPNBmNlRefF8Zq_W1Zz0lPAgR5dLQzKArHKkDOiMysdZO6N-KnlEfOEAl27gDK/exec";
 
     let currentUser = null;
+    let currentShiftId = null;
+    let modalAwalKas = 0;
     let menuList = [];
     let cart = [];
 
-    // --- AUTHENTICATION ---
+    // --- AUTHENTICATION & SHIFT ---
     async function handleLogin() {
       const usernameInput = document.getElementById("login-username").value;
       const passwordInput = document.getElementById("login-password").value;
@@ -220,15 +274,9 @@
           currentUser = data;
           document.getElementById("user-display").innerText = `${data.username} (${data.role})`;
           document.getElementById("login-screen").classList.add("hidden");
-          document.getElementById("app-screen").classList.remove("hidden");
 
-          if (data.role === "ADMIN") {
-            document.getElementById("btn-admin-view").classList.remove("hidden");
-            document.getElementById("btn-kasir-view").classList.remove("hidden");
-          }
-          
-          toggleView("kasir");
-          await loadMenu();
+          // Cek apakah ada active shift untuk kasir ini
+          await checkKasirShift();
         } else {
           alert(data.message);
         }
@@ -240,21 +288,123 @@
       }
     }
 
+    async function checkKasirShift() {
+      try {
+        const res = await fetch(`${API_URL}?action=checkShift&kasir=${currentUser.username}`, {
+          method: "GET",
+          redirect: "follow"
+        });
+        const data = await res.json();
+
+        if (data.active) {
+          currentShiftId = data.shiftId;
+          modalAwalKas = data.modalAwal;
+          openMainApp();
+        } else {
+          document.getElementById("shift-screen").classList.remove("hidden");
+        }
+      } catch (err) {
+        console.error("Gagal verifikasi shift", err);
+      }
+    }
+
+    async function startShift() {
+      const modalAwal = document.getElementById("shift-modal-awal").value;
+      if (!modalAwal) return alert("Harap isi modal awal kas!");
+
+      const btnStart = document.getElementById("btn-start-shift");
+      btnStart.disabled = true;
+
+      try {
+        const res = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({ action: "startShift", kasir: currentUser.username, modalAwal: Number(modalAwal) }),
+          redirect: "follow"
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          currentShiftId = data.shiftId;
+          modalAwalKas = Number(modalAwal);
+          document.getElementById("shift-screen").classList.add("hidden");
+          openMainApp();
+        }
+      } catch (err) {
+        alert("Gagal memulai shift.");
+      } finally {
+        btnStart.disabled = false;
+      }
+    }
+
+    async function endShift() {
+      if (!confirm("Apakah Anda yakin ingin mengakhiri shift kerja?")) return;
+
+      // Hitung total penjualan selama shift hari ini
+      const resReport = await fetch(`${API_URL}?action=getDailyReport`, { method: "GET", redirect: "follow" });
+      const reportData = await resReport.json();
+      
+      const totalPenjualanShift = reportData.transactions
+        .filter(t => t.kasir === currentUser.username)
+        .reduce((sum, t) => sum + t.total, 0);
+
+      const kasAkhir = modalAwalKas + totalPenjualanShift;
+
+      try {
+        const res = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            action: "endShift",
+            shiftId: currentShiftId,
+            totalPenjualan: totalPenjualanShift,
+            kasAkhir: kasAkhir
+          }),
+          redirect: "follow"
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          alert(`Shift Berhasil Ditutup!\nModal Awal: Rp ${modalAwalKas.toLocaleString()}\nTotal Penjualan: Rp ${totalPenjualanShift.toLocaleString()}\nKas Akhir di Laci: Rp ${kasAkhir.toLocaleString()}`);
+          logout();
+        }
+      } catch (err) {
+        alert("Gagal menutup shift.");
+      }
+    }
+
+    function openMainApp() {
+      document.getElementById("app-screen").classList.remove("hidden");
+      if (currentUser.role === "ADMIN") {
+        document.getElementById("btn-admin-view").classList.remove("hidden");
+      }
+      document.getElementById("btn-kasir-view").classList.remove("hidden");
+      toggleView("kasir");
+      loadMenu();
+    }
+
     function logout() {
       currentUser = null;
+      currentShiftId = null;
       cart = [];
       document.getElementById("app-screen").classList.add("hidden");
+      document.getElementById("shift-screen").classList.add("hidden");
       document.getElementById("login-screen").classList.remove("hidden");
     }
 
     // --- NAVIGATION ---
     function toggleView(view) {
+      document.getElementById("kasir-view").classList.add("hidden");
+      document.getElementById("admin-view").classList.add("hidden");
+      document.getElementById("report-view").classList.add("hidden");
+
       if (view === "admin") {
-        document.getElementById("kasir-view").classList.add("hidden");
         document.getElementById("admin-view").classList.remove("hidden");
         renderAdminTable();
+      } else if (view === "report") {
+        document.getElementById("report-view").classList.remove("hidden");
+        loadDailyReport();
       } else {
-        document.getElementById("admin-view").classList.add("hidden");
         document.getElementById("kasir-view").classList.remove("hidden");
       }
     }
@@ -417,7 +567,7 @@
       let itemsHtml = "";
       data.items.forEach(i => {
         itemsHtml += `
-          <div style="display:flex; justify-content:space-between;">
+          <div style="display:flex; justify-between;">
             <span>${i.nama} x${i.qty}</span>
             <span>Rp ${(i.harga * i.qty).toLocaleString()}</span>
           </div>
@@ -432,6 +582,39 @@
       receipt.classList.remove("hidden");
       window.print();
       receipt.classList.add("hidden");
+    }
+
+    // --- DAILY REPORT ---
+    async function loadDailyReport() {
+      try {
+        const res = await fetch(`${API_URL}?action=getDailyReport`, { method: "GET", redirect: "follow" });
+        const data = await res.json();
+
+        if (data.success) {
+          document.getElementById("report-date").innerText = data.date;
+          document.getElementById("summary-tx-count").innerText = data.transactions.length;
+          
+          const totalRev = data.transactions.reduce((sum, t) => sum + t.total, 0);
+          document.getElementById("summary-total-revenue").innerText = `Rp ${totalRev.toLocaleString()}`;
+
+          const tbody = document.getElementById("report-table-body");
+          tbody.innerHTML = "";
+          data.transactions.forEach(t => {
+            tbody.innerHTML += `
+              <tr>
+                <td>${t.id}</td>
+                <td>${t.waktu}</td>
+                <td>${t.kasir}</td>
+                <td>${t.jenis} ${t.meja !== '-' ? '(Meja ' + t.meja + ')' : ''}</td>
+                <td>${t.metode}</td>
+                <td>Rp ${t.total.toLocaleString()}</td>
+              </tr>
+            `;
+          });
+        }
+      } catch (err) {
+        console.error("Gagal memuat laporan harian", err);
+      }
     }
 
     // --- ADMIN ---
